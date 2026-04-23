@@ -1,0 +1,884 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, collection, addDoc, updateDoc, deleteDoc, setDoc, doc, onSnapshot, Timestamp } from 'firebase/firestore';
+import { 
+  Trash2, Shirt, Users, TrendingUp, Plus, Minus, 
+  UserCheck, CheckCircle2, Circle, Sparkles, Heart, 
+  CloudUpload, History, LayoutDashboard, CalendarDays, MapPin, Sun, Zap, Smile, Star, Trophy, Award, Medal,
+  Edit2, Lock, X, PenTool, Cloud, Crown, BookOpen, Leaf, Ghost, RotateCcw, AlertCircle
+} from 'lucide-react';
+
+// Firebase 配置
+const firebaseConfig = JSON.parse(__firebase_config);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'recycle-project-001';
+
+// 語系字典
+const translations = {
+  zh: {
+    title: "衣衣不捨",
+    subtitle: "小行動，大改變",
+    tagline: "小隊行動紀錄",
+    notebook: "行動手帳",
+    viewHistory: "看存檔",
+    backHome: "回首頁",
+    date: "今天日期",
+    location: "發生在哪？",
+    locationPlaceholder: "寫下任務地點吧...",
+    recorder: "行動紀錄者",
+    recycleCount: "二手衣回收件數",
+    carbonSaving: "地球減碳量",
+    carbonNote: "每回收一件二手衣再利用，可以幫地球減少 4.2 公斤碳排喔！(資料來源:環境部)",
+    reachCount: "影響了多少人",
+    leaderboard: "榮譽英雄榜",
+    leaderboardSub: "達成紀錄且繳交心得的隊員",
+    moreHeroes: "...以及默默付出的小英雄！",
+    times: "次",
+    exp: "經驗值",
+    nextRank: "距離升級還差",
+    maxRank: "已經是最棒的了！",
+    checkInTeammates: "點點看，今天誰也來幫忙了？",
+    attendance: "有出席非常棒隊員",
+    reflectionTracking: "心得繳交進度",
+    reflectionDesc: "點擊名牌，紀錄已繳交心得的隊員",
+    reflectionSubmitted: "已繳交",
+    reflectionPending: "還在寫",
+    waitingHeroes: "等待小英雄出現...",
+    syncData: "把行動存到雲端！",
+    historyTitle: "任務回憶錄",
+    trashTitle: "資源回收桶",
+    totalRecycled: "總計回收件數",
+    totalReached: "總計影響人數",
+    pcs: "件",
+    kg: "公斤",
+    ppl: "人",
+    passwordPrompt: "小隊長認證",
+    passwordHint: "請輸入秘密口令來授權",
+    verify: "我確認",
+    editRecord: "修改回憶",
+    saveChange: "儲存修改",
+    cancel: "不改了",
+    restore: "撿回來",
+    permDelete: "徹底丟掉",
+    levels: ["見習生", "小新手", "小幫手", "小達人", "環保大師", "無敵超人", "快時尚剋星"]
+  },
+  en: {
+    title: "Relentless Love",
+    subtitle: "Small Acts, Big Changes",
+    tagline: "Squad Action Log",
+    notebook: "Action Logbook",
+    viewHistory: "History",
+    backHome: "Home",
+    date: "Date",
+    location: "Location",
+    locationPlaceholder: "Where did this happen?",
+    recorder: "Action Recorder",
+    recycleCount: "Clothes Saved",
+    carbonSaving: "Carbon Reduced",
+    carbonNote: "Each reused garment reduces 4.2kg of carbon emissions! (Source: MOENV)",
+    reachCount: "People Reached",
+    leaderboard: "Little Heroes",
+    leaderboardSub: "Submitted reflection & joined tasks",
+    moreHeroes: "...and silent heroes!",
+    times: "times",
+    exp: "EXP",
+    nextRank: "Next rank in",
+    maxRank: "Max Level!",
+    checkInTeammates: "Who joined the fun today?",
+    attendance: "Awesome Attendees",
+    reflectionTracking: "Reflection Progress",
+    reflectionDesc: "Click a tag to mark reflection as done",
+    reflectionSubmitted: "Done",
+    reflectionPending: "Writing",
+    waitingHeroes: "Waiting for heroes...",
+    syncData: "Save to the Cloud!",
+    historyTitle: "Memory Lane",
+    trashTitle: "Recycle Bin",
+    totalRecycled: "Total Saved",
+    totalReached: "Total Reached",
+    pcs: "pcs",
+    kg: "kg",
+    ppl: "ppl",
+    passwordPrompt: "Captain Access",
+    passwordHint: "Enter secret passcode to proceed",
+    verify: "Verify",
+    editRecord: "Edit Memory",
+    saveChange: "Save Changes",
+    cancel: "Cancel",
+    restore: "Restore",
+    permDelete: "Delete Forever",
+    levels: ["Trainee", "Novice", "Helper", "Expert", "Eco Master", "Invincible", "Fashion Buster"]
+  }
+};
+
+export default function App() {
+  const CATEGORIES = ['宇宙', '鴕鳥', '文殊蘭', '小海浪', '彩虹', '穿山甲', '魟魚', '和闐玉', '小粉蝶'];
+  const CARBON_PER_ITEM = 4.2; 
+  const EDIT_PASSWORD = "1206";
+
+  const [lang, setLang] = useState('zh'); 
+  const [user, setUser] = useState(null);
+  const [view, setView] = useState('dashboard'); 
+  const [historyMode, setHistoryMode] = useState('active'); 
+  
+  const [recorderName, setRecorderName] = useState('宇宙');
+  const [activityDate, setActivityDate] = useState(new Date().toISOString().split('T')[0]);
+  const [locationAddress, setLocationAddress] = useState(''); 
+  const [recycleCount, setRecycleCount] = useState(0);
+  const [reachCount, setReachCount] = useState(0);
+  const [carbonSaving, setCarbonSaving] = useState(0); 
+  const [participants, setParticipants] = useState([]);
+  
+  const [allSubmissions, setAllSubmissions] = useState([]);
+  const [reflections, setReflections] = useState({}); 
+  
+  const [isUploading, setIsUploading] = useState(false);
+  const [message, setMessage] = useState(null);
+
+  const t = translations[lang];
+
+  const [pendingAction, setPendingAction] = useState(null); 
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [passwordInput, setPasswordInput] = useState('');
+  const [editForm, setEditForm] = useState(null);
+
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (err) { console.error(err); }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, setUser);
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    
+    const qSubmissions = collection(db, 'artifacts', appId, 'public', 'data', 'recycle_submissions');
+    const unsubSub = onSnapshot(qSubmissions, (snapshot) => {
+      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setAllSubmissions(docs);
+    }, (error) => {
+      // 新增：防呆錯誤回報，避免畫面安靜地空白
+      console.error("Firestore read error:", error);
+      setMessage({ type: 'error', text: lang === 'zh' ? '⚠️ 雲端連線異常，讀取不到大家的回憶喔！' : '⚠️ Connection error!' });
+    });
+
+    const refDoc = doc(db, 'artifacts', appId, 'public', 'data', 'team_status', 'reflections');
+    const unsubRef = onSnapshot(refDoc, (docSnap) => {
+      if (docSnap.exists()) {
+        setReflections(docSnap.data());
+      }
+    }, (error) => {
+      console.error("Firestore status error:", error);
+    });
+
+    return () => { unsubSub(); unsubRef(); };
+  }, [user]);
+
+  const historyRecords = useMemo(() => {
+    return allSubmissions.filter(doc => !doc.isDeleted).sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+  }, [allSubmissions]);
+
+  const trashRecords = useMemo(() => {
+    return allSubmissions.filter(doc => doc.isDeleted).sort((a, b) => (b.deletedAt?.seconds || 0) - (a.deletedAt?.seconds || 0));
+  }, [allSubmissions]);
+
+  // 新增：計算總計回收數量與總計影響人數
+  const totalRecycled = useMemo(() => historyRecords.reduce((sum, r) => sum + (Number(r.recycleCount) || 0), 0), [historyRecords]);
+  const totalReached = useMemo(() => historyRecords.reduce((sum, r) => sum + (Number(r.reachCount) || 0), 0), [historyRecords]);
+
+  const memberStats = useMemo(() => {
+    const stats = {};
+    CATEGORIES.forEach(name => stats[name] = 0);
+    historyRecords.forEach(record => { 
+      // 修正：計算「有出席的隊員」次數，而不是「行動紀錄者」
+      if (Array.isArray(record.participants)) {
+        record.participants.forEach(participantName => {
+          if (stats[participantName] !== undefined) {
+            stats[participantName]++;
+          }
+        });
+      }
+    });
+    return stats;
+  }, [historyRecords, CATEGORIES]);
+
+  // 新增：計算歷史中曾經繳交過心得的紀錄
+  const reflectionStats = useMemo(() => {
+    const stats = {};
+    CATEGORIES.forEach(name => stats[name] = 0);
+    historyRecords.forEach(record => {
+      if (Array.isArray(record.reflectionsSubmitted)) {
+        record.reflectionsSubmitted.forEach(participantName => {
+          if (stats[participantName] !== undefined) {
+            stats[participantName]++;
+          }
+        });
+      }
+    });
+    return stats;
+  }, [historyRecords, CATEGORIES]);
+
+  // 榮譽英雄榜邏輯：出席1次=1分，繳交心得1次=1分。總分 >= 2 才能上榜
+  const leaderboard = useMemo(() => {
+    return CATEGORIES.map(name => {
+      const attendanceScore = memberStats[name] || 0;
+      const historyReflectionScore = reflectionStats[name] || 0;
+      const currentReflectionScore = reflections[name] ? 1 : 0;
+      const totalScore = attendanceScore + historyReflectionScore + currentReflectionScore;
+      
+      return {
+        name,
+        score: totalScore
+      };
+    })
+    .filter(member => member.score >= 2)
+    .sort((a, b) => b.score - a.score);
+  }, [memberStats, reflectionStats, CATEGORIES, reflections]);
+
+  const getLevelInfo = (count) => {
+    if (count > 25) return { title: t.levels[6], color: 'bg-[#FF9B9B]', icon: <Zap size={20} />, next: null };
+    if (count >= 20) return { title: t.levels[5], color: 'bg-[#FFD700]', icon: <Medal size={20} />, next: 26 };
+    if (count >= 13) return { title: t.levels[4], color: 'bg-[#DDA0DD]', icon: <Trophy size={20} />, next: 20 };
+    if (count >= 10) return { title: t.levels[3], color: 'bg-[#87CEFA]', icon: <Award size={20} />, next: 13 };
+    if (count >= 5) return { title: t.levels[2], color: 'bg-[#98FB98]', icon: <Star size={20} />, next: 10 };
+    if (count >= 1) return { title: t.levels[1], color: 'bg-[#FFA07A]', icon: <Smile size={20} />, next: 5 };
+    return { title: t.levels[0], color: 'bg-[#E0E0E0]', icon: <Circle size={20} />, next: 1 };
+  };
+
+  const currentLevel = getLevelInfo(memberStats[recorderName] || 0);
+
+  const handleRecycleChange = (modifier) => {
+    const nextCount = Math.max(0, recycleCount + modifier);
+    setRecycleCount(nextCount);
+    setCarbonSaving(Number((nextCount * CARBON_PER_ITEM).toFixed(1)));
+  };
+
+  const handleRecycleInput = (value) => {
+    const num = Math.max(0, Number(value));
+    setRecycleCount(num);
+    setCarbonSaving(Number((num * CARBON_PER_ITEM).toFixed(1)));
+  };
+
+  const uploadToBackend = async () => {
+    if (!user) return;
+    
+    if (!locationAddress.trim()) {
+      setMessage({ type: 'error', text: lang === 'zh' ? '❌ 忘記填寫任務地點囉！' : '❌ Please enter the location!' });
+      setTimeout(() => setMessage(null), 3000);
+      return;
+    }
+
+    if (participants.length === 0) {
+      setMessage({ type: 'error', text: lang === 'zh' ? '❌ 忘記點名出席隊員囉！' : '❌ Please select at least one teammate!' });
+      setTimeout(() => setMessage(null), 3000);
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      // 收集目前打勾的心得狀態
+      const currentReflections = Object.keys(reflections).filter(k => reflections[k]);
+
+      const newRecord = {
+        recorder: recorderName,
+        activityDate,
+        locationAddress,
+        recycleCount,
+        reachCount,
+        carbonSaving: parseFloat(carbonSaving), 
+        participants: participants.map(p => p.name),
+        participantCount: participants.length,
+        reflectionsSubmitted: currentReflections, // 永久記錄本次繳交心得的隊員
+        createdAt: Timestamp.now(),
+        isDeleted: false
+      };
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'recycle_submissions'), newRecord);
+      
+      // 同步成功後，將雲端的心得繳交進度清空歸零
+      const refDoc = doc(db, 'artifacts', appId, 'public', 'data', 'team_status', 'reflections');
+      await setDoc(refDoc, {});
+
+      // 已移除成功提示標籤 (setMessage)
+      setRecycleCount(0); setReachCount(0); setCarbonSaving(0); setLocationAddress(''); setParticipants([]);
+    } catch (err) { setMessage({ type: 'error', text: 'Oops! 迷路了...' }); }
+    finally { setIsUploading(false); setTimeout(() => setMessage(null), 3000); }
+  };
+
+  const toggleReflectionStatus = async (name) => {
+    if (!user) return;
+    const newStatus = !reflections[name];
+    const refDoc = doc(db, 'artifacts', appId, 'public', 'data', 'team_status', 'reflections');
+    await setDoc(refDoc, { [name]: newStatus }, { merge: true });
+  };
+
+  const triggerAdminAction = (actionType, record) => {
+    setPendingAction({ type: actionType, record });
+    setShowPasswordModal(true);
+    setPasswordInput('');
+  };
+
+  const verifyPassword = async () => {
+    if (passwordInput === EDIT_PASSWORD) {
+      const action = pendingAction.type;
+      const recordId = pendingAction.record.id;
+      setShowPasswordModal(false);
+      if (action === 'edit') setEditForm({ ...pendingAction.record });
+      else if (action === 'delete') await executeSoftDelete(recordId);
+      else if (action === 'restore') await executeRestore(recordId);
+      else if (action === 'permanent_delete') await executePermanentDelete(recordId);
+      setPendingAction(null);
+    } else {
+      setMessage({ type: 'error', text: lang === 'zh' ? '❌ 口令不對喔' : '❌ Wrong Passcode' });
+      setPasswordInput('');
+    }
+  };
+
+  const executeSoftDelete = async (id) => {
+    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'recycle_submissions', id), { isDeleted: true, deletedAt: Timestamp.now() });
+    // 移除刪除時的提示標籤
+  };
+
+  const executeRestore = async (id) => {
+    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'recycle_submissions', id), { isDeleted: false, deletedAt: null });
+    // 移除復原時的提示標籤
+  };
+
+  const executePermanentDelete = async (id) => {
+    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'recycle_submissions', id));
+    // 移除徹底刪除時的提示標籤
+  };
+
+  const updateRecord = async () => {
+    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'recycle_submissions', editForm.id), {
+      ...editForm,
+      carbonSaving: Number((editForm.recycleCount * CARBON_PER_ITEM).toFixed(1)),
+      participantCount: (editForm.participants || []).length,
+      lastEditedAt: Timestamp.now()
+    });
+    setMessage({ type: 'success', text: lang === 'zh' ? '✅ 修改完成！' : '✅ Updated!' });
+    setEditForm(null);
+  };
+
+  const toggleEditParticipant = (name) => {
+    const current = editForm.participants || [];
+    if (current.includes(name)) {
+      setEditForm({ ...editForm, participants: current.filter(p => p !== name) });
+    } else {
+      setEditForm({ ...editForm, participants: [...current, name] });
+    }
+  };
+
+  const toggleEditReflection = (name) => {
+    const current = editForm.reflectionsSubmitted || [];
+    if (current.includes(name)) {
+      setEditForm({ ...editForm, reflectionsSubmitted: current.filter(p => p !== name) });
+    } else {
+      setEditForm({ ...editForm, reflectionsSubmitted: [...current, name] });
+    }
+  };
+
+  const toggleParticipant = (name) => {
+    const isExist = participants.find(p => p.name === name);
+    if (isExist) setParticipants(participants.filter(p => p.name !== name));
+    else setParticipants([...participants, { name, role: '活力隊員', recordedBy: recorderName }]);
+  };
+
+  const btnStyle = "border-4 border-[#FFE4C4] shadow-[6px_6px_0px_#FFE4C4] hover:translate-y-1 hover:shadow-[2px_2px_0px_#FFE4C4] active:translate-y-2 active:shadow-none transition-all rounded-[2rem] font-black";
+  const boxStyle = "bg-white border-4 border-[#FFE4C4] rounded-[2.5rem] shadow-[8px_8px_0px_#FFE4C4] p-8";
+
+  return (
+    <div className="min-h-screen bg-[#FFF9F0] p-4 md:p-6 font-sans text-[#5C4033] overflow-x-hidden relative">
+      <div className="fixed top-[5%] right-[5%] text-[#FFDAB9] opacity-40 z-0 animate-pulse"><Cloud size={150} /></div>
+      <div className="fixed bottom-[10%] left-[5%] text-[#E0F7FA] opacity-50 z-0"><Cloud size={200} /></div>
+
+      <div className="max-w-5xl mx-auto relative z-10 font-sans">
+        
+        {/* Header */}
+        <header className="mb-10 flex flex-wrap items-center justify-between gap-6">
+          <div className="relative group flex items-center gap-4">
+            <div className="bg-[#FFB6C1] p-4 rounded-full border-4 border-white shadow-[4px_4px_0px_#FF69B4] -rotate-6">
+              <Heart size={36} className="text-white fill-current" />
+            </div>
+            <div>
+              <h1 className="text-5xl font-black text-[#8B4513] tracking-tighter flex items-center gap-3">
+                {t.title} <Sun className="text-[#FFD700] animate-spin-slow" size={32} />
+              </h1>
+              <span className="text-xl text-[#D2691E] font-black block mt-1">
+                {t.subtitle}
+                <span className="text-[#FFA07A] ml-3 text-lg opacity-80">| {t.tagline}</span>
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <div className="bg-white p-1 rounded-[1.5rem] border-4 border-[#FFE4C4] shadow-[4px_4px_0px_#FFE4C4] flex">
+               <button onClick={() => setLang('zh')} className={`px-5 py-2 rounded-[1rem] text-sm font-black transition-all ${lang === 'zh' ? 'bg-[#FFDAB9] text-[#8B4513]' : 'text-[#D2B48C] hover:bg-[#FFF5EE]'}`}>中</button>
+               <button onClick={() => setLang('en')} className={`px-5 py-2 rounded-[1rem] text-sm font-black transition-all ${lang === 'en' ? 'bg-[#FFDAB9] text-[#8B4513]' : 'text-[#D2B48C] hover:bg-[#FFF5EE]'}`}>EN</button>
+            </div>
+            <button 
+              onClick={() => setView(view === 'dashboard' ? 'history' : 'dashboard')}
+              className={`flex items-center gap-2 px-6 py-3 bg-white text-[#8B4513] ${btnStyle}`}
+            >
+              {view === 'dashboard' ? <History size={20} /> : <LayoutDashboard size={20} />}
+              <span className="text-lg">{view === 'dashboard' ? t.viewHistory : t.backHome}</span>
+            </button>
+          </div>
+        </header>
+
+        {message && (
+          <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[200] px-10 py-4 rounded-full border-4 border-white shadow-[6px_6px_0px_rgba(0,0,0,0.1)] font-black text-white bg-[#FFB6C1] animate-in slide-in-from-top duration-300">
+            {message.type === 'error' ? <AlertCircle size={20} className="inline mr-2" /> : <Smile size={20} className="inline mr-2" />}
+            {message.text}
+          </div>
+        )}
+
+        {view === 'dashboard' ? (
+          <>
+            {/* 行動小手帳 */}
+            <div className={`${boxStyle} mb-8 bg-[#FFFDF8]`}>
+              <div className="flex items-center gap-3 mb-6 border-b-4 border-[#FFF0F5] pb-4">
+                <BookOpen className="text-[#FFA07A]" size={28} />
+                <h2 className="text-2xl font-black text-[#8B4513]">{t.notebook}</h2>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-end">
+                <div className="md:col-span-2 grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm font-black text-[#D2691E] mb-2 flex items-center gap-2"><CalendarDays size={16}/> {t.date}</label>
+                    <input type="date" value={activityDate} onChange={(e) => setActivityDate(e.target.value)} className="w-full bg-white text-[#8B4513] font-black p-4 rounded-[1.5rem] border-4 border-[#FFE4E1] outline-none focus:border-[#FFB6C1]" />
+                  </div>
+                  <div>
+                    <label className="text-sm font-black text-[#D2691E] mb-2 flex items-center gap-2">
+                      <MapPin size={16}/> {t.location} <span className="text-red-500">*</span>
+                    </label>
+                    <input type="text" placeholder={t.locationPlaceholder} value={locationAddress} onChange={(e) => setLocationAddress(e.target.value)} className="w-full bg-white text-[#8B4513] font-black p-4 rounded-[1.5rem] border-4 border-[#FFE4E1] outline-none focus:border-[#FFB6C1]" />
+                  </div>
+                </div>
+                <div className="flex flex-col">
+                   <label className="text-sm font-black text-[#D2691E] mb-2 flex items-center gap-2"><UserCheck size={16}/> {t.recorder}</label>
+                   <div className="bg-[#FFF5EE] p-2 rounded-[2rem] border-4 border-[#FFE4C4] flex flex-wrap gap-2">
+                     {CATEGORIES.map(name => (
+                       <button key={name} onClick={() => setRecorderName(name)} className={`px-4 py-2 rounded-[1.2rem] text-sm font-black transition-all ${recorderName === name ? 'bg-[#FFA07A] text-white shadow-[2px_2px_0px_#E9967A]' : 'bg-white text-[#D2B48C] hover:bg-[#FFF0F5]'}`}>
+                         {name}
+                       </button>
+                     ))}
+                   </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 核心 2x2 四格方陣 */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
+              
+              {/* 1. 二手衣回收件數 */}
+              <div className="bg-[#FFF0F5] border-4 border-[#FFB6C1] rounded-[3rem] p-8 shadow-[8px_8px_0px_#FFB6C1] flex flex-col justify-between group min-h-[320px]">
+                <div className="flex justify-between items-start mb-4">
+                  <div className="bg-white p-4 rounded-[1.5rem] border-4 border-[#FFB6C1] text-[#FF69B4]"><Shirt size={32} /></div>
+                  <div className="bg-white px-5 py-2 rounded-full text-xs font-black uppercase border-4 border-[#FFB6C1] text-[#FF69B4]">Recycle</div>
+                </div>
+                <div className="mb-6 flex-1 flex flex-col justify-center">
+                  <p className="text-[#DB7093] font-black text-xl mb-2">{t.recycleCount}</p>
+                  <div className="flex items-baseline gap-3">
+                    <input type="number" value={recycleCount} onChange={(e) => handleRecycleInput(e.target.value)} className="text-7xl md:text-8xl font-black bg-transparent w-full focus:outline-none text-[#C71585] tracking-tighter placeholder-[#FFC0CB] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]" />
+                    <span className="text-2xl font-black text-[#DB7093]">{t.pcs}</span>
+                  </div>
+                </div>
+                <div className="flex gap-4">
+                  <button onClick={() => handleRecycleChange(1)} className="flex-1 bg-white text-[#FF69B4] py-5 border-4 border-[#FFB6C1] shadow-[4px_4px_0px_#FFB6C1] hover:translate-y-1 hover:shadow-[2px_2px_0px_#FFB6C1] active:translate-y-2 active:shadow-none transition-all rounded-[1.5rem] font-black"><Plus size={36} className="mx-auto" strokeWidth={4} /></button>
+                  <button onClick={() => handleRecycleChange(-1)} className="flex-1 bg-[#FFE4E1] text-[#DB7093] py-5 border-4 border-[#FFB6C1] shadow-[4px_4px_0px_#FFB6C1] hover:translate-y-1 hover:shadow-[2px_2px_0px_#FFB6C1] active:translate-y-2 active:shadow-none transition-all rounded-[1.5rem] font-black"><Minus size={36} className="mx-auto" strokeWidth={4} /></button>
+                </div>
+              </div>
+
+              {/* 2. 累積減碳成果 */}
+              <div className="bg-[#F0FFF0] border-4 border-[#98FB98] rounded-[3rem] p-8 shadow-[8px_8px_0px_#98FB98] flex flex-col justify-between min-h-[320px]">
+                <div className="flex justify-between items-start mb-4">
+                  <div className="bg-white p-4 rounded-[1.5rem] border-4 border-[#98FB98] text-[#3CB371]"><Leaf size={32} /></div>
+                  <div className="bg-white px-5 py-2 rounded-full text-xs font-black uppercase border-4 border-[#98FB98] text-[#3CB371]">Impact</div>
+                </div>
+                <div className="mb-6 flex-1 flex flex-col justify-center">
+                  <p className="text-[#2E8B57] font-black text-xl mb-2">{t.carbonSaving}</p>
+                  <div className="flex items-baseline gap-3">
+                    <div className="text-7xl font-black text-[#006400] tracking-tighter">{carbonSaving}</div>
+                    <span className="text-2xl font-black text-[#2E8B57]">{t.kg}</span>
+                  </div>
+                </div>
+                <div className="bg-white rounded-[2rem] p-5 border-4 border-[#E0EEE0] text-center mt-auto">
+                   <p className="text-sm font-black text-[#556B2F] leading-relaxed flex items-center justify-center gap-2">
+                     <Sparkles size={16} className="text-[#FFD700] flex-shrink-0" /> {t.carbonNote}
+                   </p>
+                </div>
+              </div>
+
+              {/* 3. 預估影響人數 */}
+              <div className="bg-[#F4F0FF] border-4 border-[#B0C4DE] rounded-[3rem] p-8 shadow-[8px_8px_0px_#B0C4DE] flex flex-col justify-between min-h-[320px]">
+                <div className="flex justify-between items-start mb-4">
+                  <div className="bg-white p-4 rounded-[1.5rem] border-4 border-[#B0C4DE] text-[#7B68EE]"><TrendingUp size={32} /></div>
+                  <div className="bg-white px-5 py-2 rounded-full text-xs font-black uppercase border-4 border-[#B0C4DE] text-[#7B68EE]">Reach</div>
+                </div>
+                <div className="mb-6 flex-1 flex flex-col justify-center">
+                  <p className="text-[#6A5ACD] font-black text-xl mb-2">{t.reachCount}</p>
+                  <div className="flex items-baseline gap-3">
+                    <input type="number" value={reachCount} onChange={(e) => setReachCount(Math.max(0, Number(e.target.value)))} className="text-7xl font-black bg-transparent w-full focus:outline-none text-[#483D8B] tracking-tighter placeholder-[#C6E2FF] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]" />
+                    <span className="text-2xl font-black text-[#6A5ACD]">{t.ppl}</span>
+                  </div>
+                </div>
+                <div className="flex gap-4">
+                  <button onClick={() => setReachCount(prev => prev + 1)} className="flex-1 bg-white text-[#7B68EE] py-5 border-4 border-[#B0C4DE] shadow-[4px_4px_0px_#B0C4DE] hover:translate-y-1 hover:shadow-[2px_2px_0px_#B0C4DE] active:translate-y-2 active:shadow-none transition-all rounded-[1.5rem] font-black"><Plus size={36} className="mx-auto" strokeWidth={4} /></button>
+                  <button onClick={() => setReachCount(prev => Math.max(0, prev - 1))} className="flex-1 bg-[#E6E6FA] text-[#6A5ACD] py-5 border-4 border-[#B0C4DE] shadow-[4px_4px_0px_#B0C4DE] hover:translate-y-1 hover:shadow-[2px_2px_0px_#B0C4DE] active:translate-y-2 active:shadow-none transition-all rounded-[1.5rem] font-black"><Minus size={36} className="mx-auto" strokeWidth={4} /></button>
+                </div>
+              </div>
+
+              {/* 4. 榮譽小英雄榜 (迷你版，放入網格中完美對稱) */}
+              <div className="bg-[#FFFACD] border-4 border-[#F0E68C] rounded-[3rem] p-8 shadow-[8px_8px_0px_#F0E68C] flex flex-col min-h-[320px] relative overflow-hidden">
+                <div className="absolute -bottom-4 -right-4 opacity-20 text-[#DAA520]"><Trophy size={120} /></div>
+                <div className="flex items-center gap-3 mb-6 relative z-10">
+                   <div className="bg-white p-3 rounded-[1.2rem] border-4 border-[#F0E68C] text-[#DAA520]"><Trophy size={24} /></div>
+                   <div>
+                     <h3 className="text-2xl font-black text-[#B8860B]">{t.leaderboard}</h3>
+                     <p className="text-[#DAA520] font-black text-[10px]">積分超過 3 分的優秀隊員</p>
+                   </div>
+                </div>
+                
+                <div className={`flex-1 overflow-y-auto custom-scrollbar relative z-10 pr-2 ${leaderboard.length > 3 ? 'grid grid-cols-2 md:grid-cols-3 gap-2 content-start' : 'flex flex-col space-y-3'}`}>
+                  {leaderboard.length > 0 ? (
+                    <>
+                      {leaderboard.slice(0, 9).map((member, idx) => {
+                        const level = getLevelInfo(member.score);
+                        const isCrowded = leaderboard.length > 3; // 偵測是否超過三人
+                        return (
+                          <div key={member.name} className={`bg-white shadow-sm hover:scale-[1.05] transition-transform ${isCrowded ? 'rounded-2xl border-2 border-[#FFF8DC] p-2 flex flex-col items-center justify-center gap-1' : 'rounded-[1.5rem] border-4 border-[#FFF8DC] p-3 px-4 flex items-center justify-between'}`}>
+                            {isCrowded ? (
+                              /* 人數多時：變成迷你方形徽章，並排顯示 */
+                              <>
+                                <div className="flex items-center gap-1 w-full justify-center">
+                                  <div className={`w-5 h-5 flex-shrink-0 rounded-full border flex items-center justify-center font-black text-[10px] ${
+                                    idx === 0 ? 'bg-[#FFD700] text-white border-[#DAA520]' : 
+                                    idx === 1 ? 'bg-[#C0C0C0] text-white border-[#A9A9A9]' : 
+                                    idx === 2 ? 'bg-[#CD7F32] text-white border-[#8B4513]' : 
+                                    'bg-[#F5F5F5] text-[#A9A9A9] border-[#E0E0E0]'
+                                  }`}>
+                                    {idx + 1}
+                                  </div>
+                                  <p className="font-black text-[#8B4513] text-xs truncate max-w-[60px]">
+                                    {member.name}
+                                  </p>
+                                </div>
+                                <div className="flex items-baseline gap-1">
+                                  <span className="font-black text-[#D2691E] text-sm">{member.score}</span>
+                                  <span className="text-[8px] font-black text-[#DEB887]">{lang === 'zh' ? '分' : 'pts'}</span>
+                                </div>
+                              </>
+                            ) : (
+                              /* 人數少時：維持原本的寬版卡片 */
+                              <>
+                                <div className="flex items-center gap-3">
+                                  <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center font-black text-sm ${
+                                    idx === 0 ? 'bg-[#FFD700] text-white border-[#DAA520]' : 
+                                    idx === 1 ? 'bg-[#C0C0C0] text-white border-[#A9A9A9]' : 
+                                    idx === 2 ? 'bg-[#CD7F32] text-white border-[#8B4513]' : 
+                                    'bg-[#F5F5F5] text-[#A9A9A9] border-[#E0E0E0]'
+                                  }`}>
+                                    {idx + 1}
+                                  </div>
+                                  <div>
+                                    <p className="font-black text-[#8B4513] flex items-center gap-1">
+                                      {member.name} {idx === 0 && <Crown size={14} className="text-[#FFD700] fill-current" />}
+                                    </p>
+                                    <span className={`text-[9px] px-2 py-0.5 rounded-full text-white font-black inline-block mt-0.5 ${level.color}`}>{level.title}</span>
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  <span className="font-black text-[#D2691E] text-xl">{member.score}</span>
+                                  <span className="text-[10px] font-black text-[#DEB887] ml-1">{lang === 'zh' ? '分' : 'pts'}</span>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        )
+                      })}
+                      {leaderboard.length > 9 && (
+                        <div className={`text-center text-[10px] text-[#DAA520] font-black mt-2 bg-white/50 py-1 rounded-full border-2 border-[#F0E68C] border-dashed ${leaderboard.length > 3 ? 'col-span-2 md:col-span-3' : ''}`}>
+                           {t.moreHeroes}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center h-full text-[#DAA520] opacity-60 pt-4">
+                      <Ghost size={40} className="mb-2" />
+                      <p className="font-black text-sm">{t.waitingHeroes}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* 出席點名與心得繳交追蹤 */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-12">
+              
+              {/* 出席點名 */}
+              <section className={`${boxStyle} relative bg-white`}>
+                <div className="flex items-center gap-3 mb-6 border-b-4 border-[#FFF0F5] pb-4">
+                  <Users className="text-[#FFA07A]" size={28} />
+                  <div>
+                    <h3 className="text-2xl font-black text-[#8B4513]">
+                      {t.attendance} <span className="text-red-500">*</span>
+                    </h3>
+                    <p className="text-sm font-black text-[#D2B48C] mt-1">{t.checkInTeammates}</p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  {CATEGORIES.map(name => {
+                    const isActive = participants.find(p => p.name === name);
+                    return (
+                      <button key={name} onClick={() => toggleParticipant(name)} className={`px-4 py-3 rounded-[1.5rem] border-4 font-black flex items-center gap-2 transition-all active:scale-95 ${isActive ? 'bg-[#FFF0F5] border-[#FFB6C1] text-[#DB7093] shadow-[4px_4px_0px_#FFB6C1]' : 'bg-white border-[#F5F5F5] text-[#D3D3D3] hover:border-[#FFE4E1]'}`}>
+                        {isActive ? <CheckCircle2 size={20} className="fill-white" /> : <Circle size={20} />}
+                        {name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+
+              {/* 心得繳交追蹤 */}
+              <section className={`${boxStyle} relative bg-[#F0FFFF] border-[#98FB98] shadow-[8px_8px_0px_#98FB98]`}>
+                <div className="flex items-center gap-3 mb-6 border-b-4 border-[#E0EEE0] pb-4">
+                  <PenTool className="text-[#3CB371]" size={28} />
+                  <div className="w-full">
+                    <div className="flex justify-between items-center w-full">
+                      <h3 className="text-2xl font-black text-[#2E8B57]">{t.reflectionTracking}</h3>
+                      <span className="bg-white border-2 border-[#98FB98] text-[#3CB371] px-3 py-1 rounded-full text-xs font-black">
+                        {Object.values(reflections).filter(Boolean).length} / {CATEGORIES.length}
+                      </span>
+                    </div>
+                    <p className="text-sm font-black text-[#8FBC8F] mt-1">{t.reflectionDesc}</p>
+                  </div>
+                </div>
+                
+                {/* 繳交進度條 */}
+                <div className="w-full bg-white rounded-full h-4 border-4 border-[#E0EEE0] mb-6 overflow-hidden">
+                  <div className="bg-[#3CB371] h-full transition-all duration-700" style={{ width: `${(Object.values(reflections).filter(Boolean).length / CATEGORIES.length) * 100}%` }}></div>
+                </div>
+
+                <div className="flex flex-wrap gap-3">
+                  {CATEGORIES.map(name => {
+                    const hasSub = reflections[name];
+                    return (
+                      <button key={`ref-${name}`} onClick={() => toggleReflectionStatus(name)} className={`px-4 py-2 rounded-[1.2rem] border-4 font-black flex items-center gap-2 transition-all active:scale-95 ${hasSub ? 'bg-[#E0EEE0] border-[#8FBC8F] text-[#2E8B57]' : 'bg-white border-[#F0F0F0] text-[#D3D3D3] hover:border-[#E0EEE0]'}`}>
+                        <span className="text-[14px]">{name}</span>
+                        {hasSub ? <span className="text-[9px] bg-white px-2 py-0.5 rounded-full font-black border-2 border-[#8FBC8F]">{t.reflectionSubmitted}</span> : <span className="text-[9px] border-2 px-2 py-0.5 rounded-full opacity-50 font-black">{t.reflectionPending}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            </div>
+
+            <div className="flex justify-center pb-20">
+              <button onClick={uploadToBackend} disabled={isUploading} className={`flex items-center gap-4 px-12 py-6 bg-[#FFB6C1] text-white border-4 border-[#FF69B4] shadow-[8px_8px_0px_#FF69B4] hover:translate-y-1 hover:shadow-[4px_4px_0px_#FF69B4] active:translate-y-2 active:shadow-none transition-all rounded-[2.5rem] font-black text-3xl ${isUploading ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                {isUploading ? <Sparkles className="animate-spin" size={36} /> : <Heart size={36} className="fill-current" />}
+                {t.syncData}
+              </button>
+            </div>
+          </>
+        ) : (
+          /* 歷史檔案檢視 (繪本風) */
+          <div className="animate-in slide-in-from-bottom duration-500 pb-32">
+            <div className="bg-white border-4 border-[#B0E0E6] rounded-[3.5rem] shadow-[12px_12px_0px_#B0E0E6] p-8 md:p-12">
+              <div className="flex flex-col md:flex-row justify-between items-center gap-6 mb-12 border-b-4 border-[#F0F8FF] pb-8">
+                <h2 className="text-4xl font-black text-[#4682B4] flex items-center gap-4">
+                  {historyMode === 'active' ? <History size={40} /> : <Trash2 size={40} />}
+                  {historyMode === 'active' ? t.historyTitle : t.trashTitle}
+                </h2>
+                <div className="flex bg-[#F0F8FF] p-2 rounded-[2rem] border-4 border-[#B0E0E6]">
+                  <button onClick={() => setHistoryMode('active')} className={`px-6 py-3 rounded-[1.5rem] font-black text-sm transition-all ${historyMode === 'active' ? 'bg-[#87CEFA] text-white shadow-md' : 'text-[#B0C4DE]'}`}>{t.historyTitle} ({historyRecords.length})</button>
+                  <button onClick={() => setHistoryMode('trash')} className={`px-6 py-3 rounded-[1.5rem] font-black text-sm transition-all ${historyMode === 'trash' ? 'bg-[#FFA07A] text-white shadow-md' : 'text-[#B0C4DE]'}`}>{t.trashTitle} ({trashRecords.length})</button>
+                </div>
+              </div>
+
+              {/* 新增的總計統計區塊 (僅在活躍的任務回憶錄顯示) */}
+              {historyMode === 'active' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
+                  <div className="bg-[#FFF0F5] border-4 border-[#FFB6C1] rounded-[2rem] p-6 shadow-[4px_4px_0px_#FFB6C1] flex items-center">
+                    <div className="flex items-center gap-4 w-full">
+                      <div className="bg-white p-4 rounded-[1.5rem] border-4 border-[#FFB6C1] text-[#FF69B4]"><Shirt size={32} /></div>
+                      <div>
+                        <p className="text-[#DB7093] font-black text-sm mb-1">{t.totalRecycled}</p>
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-4xl md:text-5xl font-black text-[#C71585] tracking-tighter">{totalRecycled}</span>
+                          <span className="text-sm font-black text-[#DB7093]">{t.pcs}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="bg-[#F4F0FF] border-4 border-[#B0C4DE] rounded-[2rem] p-6 shadow-[4px_4px_0px_#B0C4DE] flex items-center">
+                    <div className="flex items-center gap-4 w-full">
+                      <div className="bg-white p-4 rounded-[1.5rem] border-4 border-[#B0C4DE] text-[#7B68EE]"><TrendingUp size={32} /></div>
+                      <div>
+                        <p className="text-[#6A5ACD] font-black text-sm mb-1">{t.totalReached}</p>
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-4xl md:text-5xl font-black text-[#483D8B] tracking-tighter">{totalReached}</span>
+                          <span className="text-sm font-black text-[#6A5ACD]">{t.ppl}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-6">
+                {(historyMode === 'active' ? historyRecords : trashRecords).map(record => {
+                  const recorderLevel = getLevelInfo(memberStats[record.recorder] || 0);
+                  const hasRef = reflections[record.recorder];
+                  return (
+                    <div key={record.id} className="bg-[#FFFDF8] p-6 rounded-[2.5rem] border-4 border-[#FFE4C4] shadow-[4px_4px_0px_#FFE4C4] flex flex-wrap items-center justify-between gap-6 hover:translate-y-[-2px] transition-all">
+                      <div className="flex items-center gap-6">
+                        <div className="bg-[#FFA07A] text-white p-5 rounded-[2rem] font-black text-center min-w-[120px] border-4 border-white shadow-md relative">
+                           <div className="absolute -top-3 -right-3 bg-[#FFD700] rounded-full p-1 border-2 border-white"><Star size={16} className="fill-white" /></div>
+                           <div className="text-[10px] opacity-90 mb-1">{t.date}</div>
+                           <div className="text-xl">{record.activityDate?.split('-').slice(1).join('/') || 'New'}</div>
+                        </div>
+                        <div className="flex flex-col gap-2">
+                          <div className="flex items-center gap-2">
+                             <div className={`px-3 py-1 rounded-full text-[10px] font-black text-white ${recorderLevel.color} border-2 border-white shadow-sm flex items-center gap-1`}>
+                               {recorderLevel.icon && React.cloneElement(recorderLevel.icon, {size: 12})} {recorderLevel.title}
+                             </div>
+                             {hasRef && <span className="bg-[#3CB371] text-white text-[9px] px-2 py-0.5 rounded-full font-black border-2 border-white">{t.reflectionSubmitted}</span>}
+                          </div>
+                          <div className="text-2xl font-black text-[#8B4513]">{record.recorder}</div>
+                          <div className="text-sm font-black text-[#D2B48C] flex items-center gap-1"><MapPin size={14} /> {record.locationAddress || 'Somewhere'}</div>
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-center gap-4">
+                        <div className="bg-white border-4 border-[#FFB6C1] px-6 py-3 rounded-[2rem] text-center text-[#FF69B4] font-black"><div className="text-3xl">{record.recycleCount}</div><div className="text-[10px]">{t.pcs}</div></div>
+                        <div className="bg-white border-4 border-[#98FB98] px-6 py-3 rounded-[2rem] text-center text-[#3CB371] font-black"><div className="text-3xl">{record.carbonSaving}</div><div className="text-[10px]">{t.kg}</div></div>
+                        
+                        <div className="flex flex-col gap-2 ml-2">
+                          {historyMode === 'active' ? (
+                            <>
+                              <button onClick={() => triggerAdminAction('edit', record)} className="p-3 bg-[#E6E6FA] text-[#8470FF] rounded-[1rem] border-2 border-[#B0C4DE] hover:bg-[#8470FF] hover:text-white transition-all"><Edit2 size={18}/></button>
+                              <button onClick={() => triggerAdminAction('delete', record)} className="p-3 bg-[#FFE4E1] text-[#DB7093] rounded-[1rem] border-2 border-[#FFB6C1] hover:bg-[#DB7093] hover:text-white transition-all"><Trash2 size={18}/></button>
+                            </>
+                          ) : (
+                            <>
+                              <button onClick={() => triggerAdminAction('restore', record)} className="p-3 bg-[#F0FFF0] text-[#2E8B57] rounded-[1rem] border-2 border-[#98FB98] hover:bg-[#2E8B57] hover:text-white transition-all"><RotateCcw size={18} /></button>
+                              <button onClick={() => triggerAdminAction('permanent_delete', record)} className="p-3 bg-[#F5F5F5] text-[#A9A9A9] rounded-[1rem] border-2 border-[#D3D3D3] hover:bg-[#FF6347] hover:text-white transition-all"><X size={18}/></button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 密碼驗證視窗 (繪本風) */}
+        {showPasswordModal && (
+          <div className="fixed inset-0 z-[210] flex items-center justify-center p-6 bg-[#5C4033]/60 backdrop-blur-sm animate-in fade-in">
+            <div className="bg-[#FFFDF8] w-full max-w-sm rounded-[3rem] border-4 border-[#FFDAB9] shadow-[12px_12px_0px_#FFA07A] p-10 text-center animate-in zoom-in-95">
+              <Lock size={48} className="mx-auto text-[#D2691E] mb-4" />
+              <h3 className="text-2xl font-black text-[#8B4513] mb-2">{t.passwordPrompt}</h3>
+              <p className="text-[#D2B48C] font-black text-sm mb-6">{t.passwordHint}</p>
+              <input type="password" value={passwordInput} onChange={(e) => setPasswordInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && verifyPassword()} className="w-full bg-white border-4 border-[#FFE4C4] rounded-[1.5rem] p-4 text-center font-black tracking-[1em] text-2xl text-[#8B4513] outline-none mb-6 focus:border-[#FFA07A]" autoFocus />
+              <div className="flex gap-3">
+                <button onClick={() => setShowPasswordModal(false)} className="flex-1 bg-white text-[#D2B48C] border-4 border-[#FFE4C4] py-4 rounded-[1.5rem] font-black active:translate-y-1 transition-all">{t.cancel}</button>
+                <button onClick={verifyPassword} className="flex-1 bg-[#FFA07A] text-white border-4 border-[#E9967A] shadow-[4px_4px_0px_#E9967A] py-4 rounded-[1.5rem] font-black active:translate-y-1 active:shadow-none transition-all">{t.verify}</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 編輯介面 (繪本風) */}
+        {editForm && (
+          <div className="fixed inset-0 z-[220] flex items-center justify-center p-4 bg-[#5C4033]/60 backdrop-blur-sm animate-in fade-in">
+            <div className="bg-white w-full max-w-2xl rounded-[3rem] border-4 border-[#B0E0E6] shadow-[12px_12px_0px_#B0E0E6] overflow-hidden animate-in slide-in-from-top-10">
+              <div className="bg-[#87CEFA] p-6 md:p-8 text-white flex justify-between items-center border-b-4 border-[#4682B4]">
+                <h3 className="text-3xl font-black flex items-center gap-3"><Edit2 size={28} /> {t.editRecord}</h3>
+                <button onClick={() => setEditForm(null)} className="bg-white/30 p-2 md:p-3 rounded-full hover:bg-white/50"><X size={24} /></button>
+              </div>
+              <div className="p-6 md:p-8 space-y-6 bg-[#F0F8FF] max-h-[75vh] overflow-y-auto custom-scrollbar">
+                
+                {/* 填表人與日期 */}
+                <div className="grid grid-cols-2 gap-4 md:gap-6">
+                  <div>
+                     <label className="text-sm font-black text-[#4682B4] mb-2 block">{t.recorder}</label>
+                     <select value={editForm.recorder} onChange={(e) => setEditForm({...editForm, recorder: e.target.value})} className="w-full bg-white border-4 border-[#B0E0E6] rounded-[1.5rem] p-3 font-black text-[#4682B4] outline-none">{CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select>
+                  </div>
+                  <div>
+                     <label className="text-sm font-black text-[#4682B4] mb-2 block">{t.date}</label>
+                     <input type="date" value={editForm.activityDate} onChange={(e) => setEditForm({...editForm, activityDate: e.target.value})} className="w-full bg-white border-4 border-[#B0E0E6] rounded-[1.5rem] p-3 font-black text-[#4682B4] outline-none" />
+                  </div>
+                </div>
+
+                {/* 回收數量與影響人數 (並排) */}
+                <div className="grid grid-cols-2 gap-4 md:gap-6">
+                  <div className="bg-white p-4 rounded-[2rem] border-4 border-[#B0E0E6] text-center flex flex-col justify-center">
+                     <p className="text-xs md:text-sm font-black text-[#87CEFA] mb-3 uppercase">{t.recycleCount}</p>
+                     <div className="flex items-center justify-center gap-2 md:gap-4">
+                       <button onClick={() => setEditForm({...editForm, recycleCount: Math.max(0, editForm.recycleCount - 1)})} className="p-2 md:p-3 bg-[#F0F8FF] rounded-2xl text-[#4682B4] border-4 border-[#B0E0E6] active:scale-95 font-black"><Minus size={20} strokeWidth={4}/></button>
+                       <input type="number" value={editForm.recycleCount} onChange={(e) => setEditForm({...editForm, recycleCount: Number(e.target.value)})} className="bg-transparent border-none text-center font-black text-4xl md:text-5xl text-[#4682B4] w-16 md:w-20 outline-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]" />
+                       <button onClick={() => setEditForm({...editForm, recycleCount: editForm.recycleCount + 1})} className="p-2 md:p-3 bg-[#F0F8FF] rounded-2xl text-[#4682B4] border-4 border-[#B0E0E6] active:scale-95 font-black"><Plus size={20} strokeWidth={4}/></button>
+                     </div>
+                  </div>
+                  <div className="bg-white p-4 rounded-[2rem] border-4 border-[#B0C4DE] text-center flex flex-col justify-center">
+                     <p className="text-xs md:text-sm font-black text-[#7B68EE] mb-3 uppercase">{t.reachCount}</p>
+                     <div className="flex items-center justify-center gap-2 md:gap-4">
+                       <button onClick={() => setEditForm({...editForm, reachCount: Math.max(0, (editForm.reachCount || 0) - 1)})} className="p-2 md:p-3 bg-[#F4F0FF] rounded-2xl text-[#6A5ACD] border-4 border-[#B0C4DE] active:scale-95 font-black"><Minus size={20} strokeWidth={4}/></button>
+                       <input type="number" value={editForm.reachCount || 0} onChange={(e) => setEditForm({...editForm, reachCount: Number(e.target.value)})} className="bg-transparent border-none text-center font-black text-4xl md:text-5xl text-[#6A5ACD] w-16 md:w-20 outline-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]" />
+                       <button onClick={() => setEditForm({...editForm, reachCount: (editForm.reachCount || 0) + 1})} className="p-2 md:p-3 bg-[#F4F0FF] rounded-2xl text-[#6A5ACD] border-4 border-[#B0C4DE] active:scale-95 font-black"><Plus size={20} strokeWidth={4}/></button>
+                     </div>
+                  </div>
+                </div>
+
+                {/* 出席隊員編輯 */}
+                <div className="bg-white p-5 rounded-[2rem] border-4 border-[#B0E0E6]">
+                  <label className="text-sm font-black text-[#4682B4] mb-3 flex items-center gap-2"><Users size={18}/> {t.attendance}</label>
+                  <div className="flex flex-wrap gap-2">
+                    {CATEGORIES.map(name => {
+                      const isActive = (editForm.participants || []).includes(name);
+                      return (
+                        <button key={`edit-p-${name}`} onClick={() => toggleEditParticipant(name)} className={`px-3 py-1.5 md:px-4 md:py-2 rounded-[1.2rem] border-4 font-black flex items-center gap-1.5 transition-all active:scale-95 text-xs ${isActive ? 'bg-[#FFF0F5] border-[#FFB6C1] text-[#DB7093]' : 'bg-white border-[#E0F7FA] text-[#87CEFA] hover:border-[#B0E0E6]'}`}>
+                          {isActive ? <CheckCircle2 size={16} className="fill-current" /> : <Circle size={16} />} {name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 心得繳交編輯 */}
+                <div className="bg-white p-5 rounded-[2rem] border-4 border-[#B0E0E6]">
+                  <label className="text-sm font-black text-[#4682B4] mb-3 flex items-center gap-2"><PenTool size={18}/> {t.reflectionTracking}</label>
+                  <div className="flex flex-wrap gap-2">
+                    {CATEGORIES.map(name => {
+                      const hasSub = (editForm.reflectionsSubmitted || []).includes(name);
+                      return (
+                        <button key={`edit-r-${name}`} onClick={() => toggleEditReflection(name)} className={`px-3 py-1.5 md:px-4 md:py-2 rounded-[1.2rem] border-4 font-black flex items-center gap-1.5 transition-all active:scale-95 text-xs ${hasSub ? 'bg-[#E0EEE0] border-[#8FBC8F] text-[#2E8B57]' : 'bg-white border-[#E0F7FA] text-[#87CEFA] hover:border-[#B0E0E6]'}`}>
+                          {hasSub ? <CheckCircle2 size={16} className="fill-current" /> : <Circle size={16} />} {name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <button onClick={updateRecord} disabled={isUploading} className="w-full bg-[#87CEFA] text-white py-4 rounded-[2rem] font-black text-xl md:text-2xl border-4 border-[#4682B4] shadow-[6px_6px_0px_#4682B4] active:translate-y-1 active:shadow-none transition-all">{t.saveChange}</button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
